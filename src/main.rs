@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 use std::env;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::CommandExt; // Unix-only: exec() replaces the process
 use std::path::PathBuf;
 use std::process::Command;
 use tiny_http::{Header, Method, Response, Server};
@@ -20,7 +20,7 @@ fn db_path() -> PathBuf {
 fn home_dir() -> PathBuf {
     env::var("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
+        .expect("$HOME is not set")
 }
 
 fn get_db() -> Connection {
@@ -77,7 +77,7 @@ fn list_sessions(limit: usize) {
             })
         })
         .unwrap()
-        .filter_map(|r| r.ok())
+        .map(|r| r.expect("failed to read session row"))
         .collect();
 
     if rows.is_empty() {
@@ -116,7 +116,7 @@ fn search_sessions(query: &str) {
             })
         })
         .unwrap()
-        .filter_map(|r| r.ok())
+        .map(|r| r.expect("failed to read session row"))
         .collect();
 
     if rows.is_empty() {
@@ -152,7 +152,7 @@ fn get_all_sessions(db: &Connection) -> Vec<Session> {
         })
     })
     .unwrap()
-    .filter_map(|r| r.ok())
+    .map(|r| r.expect("failed to read session row"))
     .collect()
 }
 
@@ -240,7 +240,7 @@ fn delete_session(identifier: &str) {
 
     let deleted = db
         .execute("DELETE FROM sessions WHERE id = ?1", params![identifier])
-        .unwrap_or(0);
+        .expect("failed to delete session");
     if deleted > 0 {
         println!("Deleted {deleted} session(s).");
         return;
@@ -248,7 +248,7 @@ fn delete_session(identifier: &str) {
     let pattern = format!("%{identifier}%");
     let deleted = db
         .execute("DELETE FROM sessions WHERE id LIKE ?1", params![pattern])
-        .unwrap_or(0);
+        .expect("failed to delete session");
     if deleted > 0 {
         println!("Deleted {deleted} session(s).");
     } else {
