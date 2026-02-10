@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cch — Session Manager</title>
+  <script>
+    // Apply theme BEFORE anything renders to avoid flash
+    (function() {
+      const t = localStorage.getItem('cch-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            void:          'var(--void)',
+            surface:       'var(--surface)',
+            raised:        'var(--raised)',
+            border:        'var(--border)',
+            'border-bright':'var(--border-bright)',
+            muted:         'var(--muted)',
+            subtle:        'var(--subtle)',
+            primary:       'var(--primary)',
+            bright:        'var(--bright)',
+            accent:        'var(--accent)',
+            'accent-glow': 'var(--accent-glow)',
+            danger:        'var(--danger)',
+            'danger-dim':  'var(--danger-dim)',
+          },
+          fontFamily: {
+            sans: ['Outfit', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    :root[data-theme="dark"] {
+      --void: #000000;
+      --surface: #050505;
+      --raised: #0a0a0a;
+      --border: #1a1a1a;
+      --border-bright: #2a2a2a;
+      --muted: #555555;
+      --subtle: #777777;
+      --primary: #cccccc;
+      --bright: #f0f0f0;
+      --accent: #ffffff;
+      --accent-glow: rgba(255,255,255,0.08);
+      --danger: #ff4444;
+      --danger-dim: rgba(255,68,68,0.10);
+      --row-hover: #0a0a0a;
+      --sidebar-active: #0f0f0f;
+      --kbd-bg: #111;
+      --kbd-border: #2a2a2a;
+      --kbd-color: #555;
+      --scrollbar: #222;
+      --scrollbar-hover: #333;
+      --focus-ring: #fff;
+      --focus-glow: rgba(255,255,255,0.08);
+      --grain-opacity: 0.02;
+    }
+    :root[data-theme="light"] {
+      --void: #ffffff;
+      --surface: #fafafa;
+      --raised: #f5f5f5;
+      --border: #e5e5e5;
+      --border-bright: #d5d5d5;
+      --muted: #999999;
+      --subtle: #777777;
+      --primary: #333333;
+      --bright: #111111;
+      --accent: #000000;
+      --accent-glow: rgba(0,0,0,0.05);
+      --danger: #dd2222;
+      --danger-dim: rgba(221,34,34,0.08);
+      --row-hover: #f5f5f5;
+      --sidebar-active: #efefef;
+      --kbd-bg: #eee;
+      --kbd-border: #d5d5d5;
+      --kbd-color: #999;
+      --scrollbar: #ddd;
+      --scrollbar-hover: #ccc;
+      --focus-ring: #000;
+      --focus-glow: rgba(0,0,0,0.06);
+      --grain-opacity: 0.015;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { background: var(--void); }
+    body { background: var(--void); min-height: 100vh; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      pointer-events: none;
+      opacity: var(--grain-opacity);
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    }
+
+    @keyframes rowIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .row-animate { animation: rowIn 0.3s ease-out both; }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to { opacity: 0; transform: translateY(6px) scale(0.97); }
+    }
+    .toast-in { animation: toastIn 0.25s ease-out both; }
+    .toast-out { animation: toastOut 0.2s ease-in both; }
+
+    input:focus { outline: none; box-shadow: 0 0 0 1px var(--focus-ring), 0 0 0 3px var(--focus-glow); }
+
+    .session-row { transition: background 0.15s ease; }
+    .session-row:hover { background: var(--row-hover); }
+    .session-row:hover .row-actions { opacity: 1; }
+    .row-actions { opacity: 0; transition: opacity 0.15s ease; }
+
+    .kbd {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--kbd-bg);
+      border: 1px solid var(--kbd-border);
+      color: var(--kbd-color);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .confirm-bar { animation: rowIn 0.15s ease-out both; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite; }
+
+    .sidebar-item { transition: background 0.12s ease, color 0.12s ease; }
+    .sidebar-item:hover { background: var(--row-hover); }
+    .sidebar-item.active { background: var(--sidebar-active); color: var(--bright); }
+
+    /* Theme toggle */
+    .theme-toggle { transition: opacity 0.15s ease; }
+    .theme-toggle:hover { opacity: 0.7; }
+  </style>
+</head>
+<body class="font-sans text-primary antialiased">
+
+  <div class="relative z-10 flex min-h-screen">
+
+    <!-- Sidebar -->
+    <aside class="w-56 shrink-0 border-r border-border flex flex-col py-6 px-3 sticky top-0 h-screen overflow-y-auto">
+      <!-- Logo + theme toggle -->
+      <div class="flex items-center justify-between px-2 mb-8">
+        <div class="flex items-center gap-2.5">
+          <div class="w-6 h-6 rounded-md bg-accent-glow border border-border-bright flex items-center justify-center">
+            <span class="font-mono text-accent text-[10px] font-semibold">></span>
+          </div>
+          <span class="font-mono text-accent text-sm font-medium tracking-tight">cch</span>
+        </div>
+        <button onclick="toggleTheme()" class="theme-toggle p-1 rounded-md text-muted" title="Toggle theme">
+          <!-- Sun icon (shown in dark mode) -->
+          <svg id="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+            <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <!-- Moon icon (shown in light mode) -->
+          <svg id="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- All sessions -->
+      <div class="mb-6">
+        <button id="nav-all" onclick="selectFilter('all')" class="sidebar-item active w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-light">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+          <span>All Sessions</span>
+          <span id="nav-all-count" class="ml-auto font-mono text-muted text-[10px]">0</span>
+        </button>
+      </div>
+
+      <!-- Directories -->
+      <div class="mb-2 px-2.5">
+        <span class="text-[10px] font-mono uppercase tracking-widest text-muted/60">Directories</span>
+      </div>
+      <div id="sidebar-dirs" class="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto"></div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="flex-1 min-w-0 py-8 px-8">
+      <!-- Header bar -->
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 id="main-title" class="text-bright text-sm font-medium">All Sessions</h2>
+        </div>
+        <div class="flex items-center gap-2 text-muted text-xs">
+          <span class="pulse-dot w-1.5 h-1.5 rounded-full bg-accent inline-block"></span>
+          <span id="session-count" class="font-mono">0 sessions</span>
+        </div>
+      </div>
+
+      <!-- Search -->
+      <div class="mb-6 relative">
+        <div class="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+          </svg>
+        </div>
+        <input
+          id="search"
+          type="text"
+          placeholder="Filter sessions…"
+          class="w-full bg-raised border border-border rounded-lg pl-9 pr-4 py-2.5 text-sm text-primary placeholder:text-muted/60 font-light tracking-wide transition-all"
+        />
+        <div class="absolute right-3 top-1/2 -translate-y-1/2">
+          <span class="kbd">/</span>
+        </div>
+      </div>
+
+      <!-- Table header -->
+      <div class="flex items-center px-4 py-2 text-[11px] font-mono uppercase tracking-widest text-muted/70 border-b border-border">
+        <div class="flex-1">Session</div>
+        <div class="w-28 text-right">Time</div>
+        <div class="w-32"></div>
+      </div>
+
+      <!-- Session list -->
+      <div id="session-list" class="divide-y divide-border/60"></div>
+
+      <!-- Empty state -->
+      <div id="empty-state" class="hidden py-24 text-center">
+        <div class="w-12 h-12 mx-auto mb-4 rounded-xl bg-raised border border-border flex items-center justify-center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-muted">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" stroke-linecap="round" stroke-linejoin="round"/>
+            <polyline points="14 2 14 8 20 8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="text-subtle text-sm font-light mb-1">No sessions saved</p>
+        <p class="text-muted text-xs font-light font-mono">cch &lt;session-id&gt; "title"</p>
+      </div>
+
+      <!-- No results -->
+      <div id="no-results" class="hidden py-16 text-center">
+        <p class="text-subtle text-sm font-light">No matching sessions</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 items-end"></div>
+
+  <script>
+    const API = '/api/sessions';
+    let sessions = [];
+    let deleteConfirm = null;
+    let activeFilter = 'all';
+
+    // Theme
+    function getTheme() {
+      return document.documentElement.getAttribute('data-theme') || 'dark';
+    }
+    function toggleTheme() {
+      const next = getTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('cch-theme', next);
+      updateThemeIcons();
+    }
+    function updateThemeIcons() {
+      const isDark = getTheme() === 'dark';
+      document.getElementById('icon-sun').classList.toggle('hidden', !isDark);
+      document.getElementById('icon-moon').classList.toggle('hidden', isDark);
+    }
+    updateThemeIcons();
+
+    // Elements
+    const listEl = document.getElementById('session-list');
+    const emptyEl = document.getElementById('empty-state');
+    const noResultsEl = document.getElementById('no-results');
+    const searchEl = document.getElementById('search');
+    const countEl = document.getElementById('session-count');
+    const toastContainer = document.getElementById('toast-container');
+    const sidebarDirs = document.getElementById('sidebar-dirs');
+    const mainTitle = document.getElementById('main-title');
+    const navAllCount = document.getElementById('nav-all-count');
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement !== searchEl) {
+        e.preventDefault();
+        searchEl.focus();
+      }
+      if (e.key === 'Escape') {
+        searchEl.blur();
+        searchEl.value = '';
+        renderFiltered();
+      }
+    });
+
+    searchEl.addEventListener('input', () => renderFiltered());
+
+    function selectFilter(filter) {
+      activeFilter = filter;
+      searchEl.value = '';
+      renderFiltered();
+      renderSidebar();
+    }
+
+    function getFilteredSessions() {
+      let data = sessions;
+      if (activeFilter !== 'all') {
+        data = data.filter(s => s.pwd === activeFilter);
+      }
+      const q = searchEl.value.toLowerCase().trim();
+      if (q) {
+        data = data.filter(s =>
+          s.title.toLowerCase().includes(q) ||
+          s.id.toLowerCase().includes(q) ||
+          s.pwd.toLowerCase().includes(q)
+        );
+      }
+      return data;
+    }
+
+    function renderFiltered() {
+      const data = getFilteredSessions();
+      render(data);
+    }
+
+    function timeAgo(dateStr) {
+      const now = new Date();
+      const date = new Date(dateStr);
+      const diff = Math.floor((now - date) / 1000);
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+      if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function shortPath(pwd) {
+      const home = pwd.match(/^\/Users\/[^/]+/)?.[0] || '';
+      if (home && pwd.startsWith(home)) return '~' + pwd.slice(home.length);
+      return pwd;
+    }
+
+    function dirLabel(pwd) {
+      const short = shortPath(pwd);
+      const parts = short.split('/').filter(Boolean);
+      if (parts.length <= 1) return short;
+      return parts.slice(-2).join('/');
+    }
+
+    function toast(message, type = 'default') {
+      const el = document.createElement('div');
+      const colors = {
+        default: 'bg-accent-glow border-border-bright text-bright',
+        danger: 'bg-danger-dim border-danger/20 text-danger',
+      };
+      el.className = `toast-in px-4 py-2.5 rounded-lg border text-xs font-mono font-light ${colors[type] || colors.default}`;
+      el.textContent = message;
+      toastContainer.appendChild(el);
+      setTimeout(() => {
+        el.classList.remove('toast-in');
+        el.classList.add('toast-out');
+        setTimeout(() => el.remove(), 200);
+      }, 2000);
+    }
+
+    function copyCmd(id) {
+      navigator.clipboard.writeText(`claude --resume ${id}`).then(() => toast('Copied resume cmd'));
+    }
+    function copyCmdDangerous(id) {
+      navigator.clipboard.writeText(`claude --resume ${id} --dangerously-skip-permissions`).then(() => toast('Copied (skip perms)'));
+    }
+
+    function confirmDelete(id) {
+      if (deleteConfirm === id) { deleteConfirm = null; renderFiltered(); return; }
+      deleteConfirm = id;
+      renderFiltered();
+    }
+
+    async function doDelete(id) {
+      try {
+        await fetch(`${API}/${id}`, { method: 'DELETE' });
+        sessions = sessions.filter(s => s.id !== id);
+        deleteConfirm = null;
+        renderSidebar();
+        renderFiltered();
+        toast('Session deleted', 'danger');
+      } catch (e) {
+        toast('Delete failed', 'danger');
+      }
+    }
+
+    function renderSidebar() {
+      const dirMap = {};
+      sessions.forEach(s => { dirMap[s.pwd] = (dirMap[s.pwd] || 0) + 1; });
+      const dirs = Object.keys(dirMap).sort();
+
+      navAllCount.textContent = sessions.length;
+
+      const navAll = document.getElementById('nav-all');
+      navAll.className = `sidebar-item w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-light ${activeFilter === 'all' ? 'active text-bright' : 'text-muted'}`;
+
+      mainTitle.textContent = activeFilter === 'all' ? 'All Sessions' : shortPath(activeFilter);
+
+      sidebarDirs.innerHTML = '';
+      dirs.forEach(dir => {
+        const btn = document.createElement('button');
+        const isActive = activeFilter === dir;
+        btn.className = `sidebar-item w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-light text-left ${isActive ? 'active text-bright' : 'text-muted'}`;
+        btn.onclick = () => selectFilter(dir);
+        btn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
+          </svg>
+          <span class="truncate flex-1" title="${escHtml(shortPath(dir))}">${escHtml(dirLabel(dir))}</span>
+          <span class="ml-auto font-mono text-[10px] shrink-0 ${isActive ? 'text-subtle' : 'text-muted/60'}">${dirMap[dir]}</span>
+        `;
+        sidebarDirs.appendChild(btn);
+      });
+    }
+
+    function render(data) {
+      listEl.innerHTML = '';
+
+      if (sessions.length === 0) {
+        emptyEl.classList.remove('hidden');
+        noResultsEl.classList.add('hidden');
+        countEl.textContent = '0 sessions';
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
+      if (data.length === 0) {
+        noResultsEl.classList.remove('hidden');
+        countEl.textContent = `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+        return;
+      }
+      noResultsEl.classList.add('hidden');
+      countEl.textContent = `${data.length} session${data.length !== 1 ? 's' : ''}`;
+
+      data.forEach((s, i) => {
+        const row = document.createElement('div');
+        row.className = 'session-row row-animate flex items-center px-4 py-3 cursor-default group';
+        row.style.animationDelay = `${i * 40}ms`;
+
+        if (deleteConfirm === s.id) {
+          row.innerHTML = `
+            <div class="confirm-bar flex-1 flex items-center justify-between">
+              <span class="text-xs text-danger font-light">Delete "${s.title.length > 30 ? s.title.slice(0, 30) + '\u2026' : s.title}"?</span>
+              <div class="flex items-center gap-2">
+                <button onclick="doDelete('${s.id}')" class="px-3 py-1 rounded-md text-xs font-mono bg-danger-dim text-danger border border-danger/25 hover:bg-danger/20 transition-colors">confirm</button>
+                <button onclick="confirmDelete('${s.id}')" class="px-3 py-1 rounded-md text-xs font-mono text-muted border border-border hover:border-border-bright transition-colors">cancel</button>
+              </div>
+            </div>
+          `;
+        } else {
+          const showDir = activeFilter === 'all';
+          row.innerHTML = `
+            <div class="flex-1 min-w-0 pr-4">
+              <div class="flex items-center gap-2.5 mb-0.5">
+                <span class="text-sm text-bright font-normal truncate">${escHtml(s.title)}</span>
+                <span class="font-mono text-[11px] text-muted/70 shrink-0">${s.id.slice(0, 8)}</span>
+              </div>
+              ${showDir ? `<div class="font-mono text-[11px] text-muted/50 truncate">${escHtml(shortPath(s.pwd))}</div>` : ''}
+            </div>
+            <div class="w-28 text-right pr-2">
+              <span class="text-[11px] text-muted/60 font-light">${timeAgo(s.created_at)}</span>
+            </div>
+            <div class="w-32 flex items-center justify-end gap-1 row-actions">
+              <button onclick="copyCmd('${s.id}')" title="Copy: claude --resume" class="p-1.5 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="14" height="14" x="8" y="8" rx="2"/>
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                </svg>
+              </button>
+              <button onclick="copyCmdDangerous('${s.id}')" title="Copy: claude --resume --dangerously-skip-permissions" class="p-1.5 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+              </button>
+              <button onclick="confirmDelete('${s.id}')" title="Delete session" class="p-1.5 rounded-md hover:bg-danger-dim text-muted hover:text-danger transition-all">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                </svg>
+              </button>
+            </div>
+          `;
+        }
+        listEl.appendChild(row);
+      });
+    }
+
+    function escHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    async function load() {
+      try {
+        const res = await fetch(API);
+        sessions = await res.json();
+        renderSidebar();
+        renderFiltered();
+      } catch (e) {
+        emptyEl.classList.remove('hidden');
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
