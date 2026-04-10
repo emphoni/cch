@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>cch — Session Manager</title>
+  <title>cch - Session Manager</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <script>
     // Apply theme BEFORE anything renders to avoid flash
     (function() {
@@ -12,6 +13,7 @@
     })();
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/vendor/marked.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -47,8 +49,8 @@
       --void: #000000;
       --surface: #050505;
       --raised: #0a0a0a;
-      --border: #1a1a1a;
-      --border-bright: #2a2a2a;
+      --border: #0e0e0e;
+      --border-bright: #151515;
       --muted: #555555;
       --subtle: #777777;
       --primary: #cccccc;
@@ -159,9 +161,49 @@
     .sidebar-item:hover { background: var(--row-hover); }
     .sidebar-item.active { background: var(--sidebar-active); color: var(--bright); }
 
+    /* Markdown prose */
+    .md-prose { line-height: 1.6; }
+    .md-prose h1, .md-prose h2, .md-prose h3 { color: var(--bright); font-weight: 500; margin: 0.8em 0 0.4em; }
+    .md-prose h1 { font-size: 1.25em; }
+    .md-prose h2 { font-size: 1.1em; }
+    .md-prose h3 { font-size: 1em; }
+    .md-prose p { margin: 0.4em 0; }
+    .md-prose ul, .md-prose ol { margin: 0.4em 0; padding-left: 1.5em; }
+    .md-prose li { margin: 0.15em 0; }
+    .md-prose code { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; background: var(--raised); border: 1px solid var(--border); border-radius: 3px; padding: 0.1em 0.35em; }
+    .md-prose pre { margin: 0.6em 0; background: var(--raised); border: 1px solid var(--border); border-radius: 6px; padding: 0.75em 1em; overflow-x: auto; }
+    .md-prose pre code { background: none; border: none; padding: 0; font-size: 0.8em; }
+    .md-prose strong { color: var(--bright); font-weight: 600; }
+    .md-prose a { color: var(--accent); text-decoration: underline; }
+    .md-prose hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+    .md-prose table { width: 100%; border-collapse: collapse; margin: 0.6em 0; font-size: 0.85em; }
+    .md-prose th, .md-prose td { border: 1px solid var(--border); padding: 0.4em 0.75em; text-align: left; }
+    .md-prose th { background: var(--raised); color: var(--bright); font-weight: 500; }
+    .md-prose blockquote { border-left: 2px solid var(--border-bright); padding-left: 0.75em; margin: 0.5em 0; color: var(--subtle); }
+
     /* Theme toggle */
     .theme-toggle { transition: opacity 0.15s ease; }
     .theme-toggle:hover { opacity: 0.7; }
+
+    /* Danger toggle switch */
+    .toggle-track {
+      width: 28px; height: 16px;
+      border-radius: 8px;
+      background: var(--border-bright);
+      position: relative;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .toggle-track.on { background: var(--danger); }
+    .toggle-track .toggle-knob {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--bright);
+      position: absolute;
+      top: 2px; left: 2px;
+      transition: transform 0.2s ease;
+    }
+    .toggle-track.on .toggle-knob { transform: translateX(12px); }
   </style>
 </head>
 <body class="font-sans text-primary antialiased">
@@ -216,9 +258,22 @@
         <div>
           <h2 id="main-title" class="text-bright text-sm font-medium">All Sessions</h2>
         </div>
-        <div class="flex items-center gap-2 text-muted text-xs">
-          <span class="pulse-dot w-1.5 h-1.5 rounded-full bg-accent inline-block"></span>
-          <span id="session-count" class="font-mono">0 sessions</span>
+        <div class="flex items-center gap-4 text-muted text-xs">
+          <div class="flex items-center gap-2">
+            <span id="danger-label" class="font-mono text-[11px] text-muted">safe</span>
+            <div id="danger-toggle" onclick="toggleDangerous()" class="toggle-track" title="Toggle --dangerously-skip-permissions">
+              <div class="toggle-knob"></div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="pulse-dot w-1.5 h-1.5 rounded-full bg-accent inline-block"></span>
+            <span id="session-count" class="font-mono">0 sessions</span>
+            <a href="/api/db" title="Download sessions.db" class="p-1 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>
+              </svg>
+            </a>
+          </div>
         </div>
       </div>
 
@@ -244,7 +299,7 @@
       <div class="flex items-center px-4 py-2 text-[11px] font-mono uppercase tracking-widest text-muted/70 border-b border-border">
         <div class="flex-1">Session</div>
         <div class="w-28 text-right">Time</div>
-        <div class="w-32"></div>
+        <div class="w-24"></div>
       </div>
 
       <!-- Session list -->
@@ -267,6 +322,11 @@
         <p class="text-subtle text-sm font-light">No matching sessions</p>
       </div>
     </main>
+
+    <!-- Detail view (hidden by default) -->
+    <main id="detail-view" class="hidden flex-1 min-w-0 py-8 px-8 overflow-y-auto">
+      <div id="detail-content"></div>
+    </main>
   </div>
 
   <!-- Toast container -->
@@ -277,6 +337,23 @@
     let sessions = [];
     let deleteConfirm = null;
     let activeFilter = 'all';
+    let dangerousMode = localStorage.getItem('cch-dangerous') === 'true';
+
+    // Dangerous toggle
+    function updateDangerToggle() {
+      const track = document.getElementById('danger-toggle');
+      const label = document.getElementById('danger-label');
+      track.classList.toggle('on', dangerousMode);
+      label.textContent = dangerousMode ? 'skip-perms' : 'safe';
+      label.classList.toggle('text-danger', dangerousMode);
+      label.classList.toggle('text-muted', !dangerousMode);
+    }
+    function toggleDangerous() {
+      dangerousMode = !dangerousMode;
+      localStorage.setItem('cch-dangerous', dangerousMode);
+      updateDangerToggle();
+    }
+    updateDangerToggle();
 
     // Theme
     function getTheme() {
@@ -324,6 +401,11 @@
     function selectFilter(filter) {
       activeFilter = filter;
       searchEl.value = '';
+      if (filter === 'all') {
+        history.replaceState(null, '', '/');
+      } else {
+        history.replaceState(null, '', '/' + dirLabel(filter));
+      }
       renderFiltered();
       renderSidebar();
     }
@@ -390,16 +472,55 @@
     }
 
     function copyCmd(id) {
-      navigator.clipboard.writeText(`claude --resume ${id}`).then(() => toast('Copied resume cmd'));
-    }
-    function copyCmdDangerous(id) {
-      navigator.clipboard.writeText(`claude --resume ${id} --dangerously-skip-permissions`).then(() => toast('Copied (skip perms)'));
+      const s = sessions.find(s => s.id === id);
+      const dir = s ? s.pwd : '';
+      const resume = dangerousMode
+        ? `claude --resume ${id} --dangerously-skip-permissions`
+        : `claude --resume ${id}`;
+      const cmd = dir ? `cd ${dir} && ${resume}` : resume;
+      navigator.clipboard.writeText(cmd).then(() => toast('Copied resume cmd'));
     }
 
     function confirmDelete(id) {
       if (deleteConfirm === id) { deleteConfirm = null; renderFiltered(); return; }
       deleteConfirm = id;
       renderFiltered();
+    }
+
+    function startRename(id, currentTitle) {
+      const row = document.querySelector(`[data-id="${id}"]`);
+      if (!row) return;
+      const titleEl = row.querySelector('.session-title');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentTitle;
+      input.className = 'bg-raised border border-border-bright rounded px-2 py-0.5 text-sm text-bright font-normal w-64 focus:outline-none focus:border-accent';
+      input.onclick = (e) => e.stopPropagation();
+
+      const commit = async () => {
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+          await fetch(`${API}/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle }),
+          });
+          const s = sessions.find(s => s.id === id);
+          if (s) s.title = newTitle;
+          toast('Renamed');
+        }
+        renderFiltered();
+      };
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') renderFiltered();
+      });
+      input.addEventListener('blur', commit);
+
+      titleEl.replaceWith(input);
+      input.focus();
+      input.select();
     }
 
     async function doDelete(id) {
@@ -434,8 +555,8 @@
         btn.className = `sidebar-item w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs font-light text-left ${isActive ? 'active text-bright' : 'text-muted'}`;
         btn.onclick = () => selectFilter(dir);
         btn.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
-            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+            <path d="m15 10 5 5-5 5"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>
           </svg>
           <span class="truncate flex-1" title="${escHtml(shortPath(dir))}">${escHtml(dirLabel(dir))}</span>
           <span class="ml-auto font-mono text-[10px] shrink-0 ${isActive ? 'text-subtle' : 'text-muted/60'}">${dirMap[dir]}</span>
@@ -465,12 +586,12 @@
 
       data.forEach((s, i) => {
         const row = document.createElement('div');
-        row.className = 'session-row row-animate flex items-center px-4 py-3 cursor-default group';
+        row.className = 'session-row row-animate flex items-stretch group';
         row.style.animationDelay = `${i * 40}ms`;
 
         if (deleteConfirm === s.id) {
           row.innerHTML = `
-            <div class="confirm-bar flex-1 flex items-center justify-between">
+            <div class="confirm-bar flex-1 flex items-center justify-between px-4 py-3">
               <span class="text-xs text-danger font-light">Delete "${s.title.length > 30 ? s.title.slice(0, 30) + '\u2026' : s.title}"?</span>
               <div class="flex items-center gap-2">
                 <button onclick="doDelete('${s.id}')" class="px-3 py-1 rounded-md text-xs font-mono bg-danger-dim text-danger border border-danger/25 hover:bg-danger/20 transition-colors">confirm</button>
@@ -480,27 +601,32 @@
           `;
         } else {
           const showDir = activeFilter === 'all';
+          row.setAttribute('data-id', s.id);
           row.innerHTML = `
-            <div class="flex-1 min-w-0 pr-4">
-              <div class="flex items-center gap-2.5 mb-0.5">
-                <span class="text-sm text-bright font-normal truncate">${escHtml(s.title)}</span>
-                <span class="font-mono text-[11px] text-muted/70 shrink-0">${s.id.slice(0, 8)}</span>
+            <div class="w-1/2 min-w-0 pr-4 pl-4 py-3 cursor-pointer border-r border-dashed border-border/40 flex items-center gap-3 group/open" onclick="navigateToSession('${s.id}')">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2.5 mb-0.5">
+                  <span class="session-title text-sm text-bright font-normal truncate">${escHtml(s.title)}</span>
+                  <span class="font-mono text-[11px] text-muted/70 shrink-0">${s.id.slice(0, 8)}</span>
+                </div>
+                ${showDir ? `<div class="font-mono text-[11px] text-muted/50 truncate">${escHtml(shortPath(s.pwd))}</div>` : ''}
               </div>
-              ${showDir ? `<div class="font-mono text-[11px] text-muted/50 truncate">${escHtml(shortPath(s.pwd))}</div>` : ''}
+              <span class="text-[11px] text-muted font-mono hidden group-hover/open:flex items-center gap-1.5 shrink-0">
+                open
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </span>
             </div>
-            <div class="w-28 text-right pr-2">
-              <span class="text-[11px] text-muted/60 font-light">${timeAgo(s.created_at)}</span>
+            <div class="flex-1 cursor-pointer flex items-center justify-end pr-2 pl-4 py-3 group/copy" onclick="copyCmd('${s.id}')">
+              <span class="text-[11px] text-muted/60 font-light group-hover/copy:hidden">${timeAgo(s.created_at)}</span>
+              <span class="text-[11px] text-muted font-mono hidden group-hover/copy:flex items-center gap-1.5">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                copy
+              </span>
             </div>
-            <div class="w-32 flex items-center justify-end gap-1 row-actions">
-              <button onclick="copyCmd('${s.id}')" title="Copy: claude --resume" class="p-1.5 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
+            <div class="w-24 flex items-center justify-end gap-1 row-actions py-3 pr-4">
+              <button onclick="event.stopPropagation(); startRename('${s.id}', '${escHtml(s.title).replace(/'/g, "\\'")}')" title="Rename" class="p-1.5 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect width="14" height="14" x="8" y="8" rx="2"/>
-                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
-                </svg>
-              </button>
-              <button onclick="copyCmdDangerous('${s.id}')" title="Copy: claude --resume --dangerously-skip-permissions" class="p-1.5 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>
+                  <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
                 </svg>
               </button>
               <button onclick="confirmDelete('${s.id}')" title="Delete session" class="p-1.5 rounded-md hover:bg-danger-dim text-muted hover:text-danger transition-all">
@@ -522,10 +648,196 @@
       return d.innerHTML;
     }
 
+    // Detail view
+    const detailView = document.getElementById('detail-view');
+    const detailContent = document.getElementById('detail-content');
+    const listView = document.querySelector('main:not(#detail-view)');
+    const sidebar = document.querySelector('aside');
+
+    function showListView() {
+      detailView.classList.add('hidden');
+      listView.classList.remove('hidden');
+      sidebar.classList.remove('hidden');
+    }
+
+    function showDetailView() {
+      detailView.classList.remove('hidden');
+      listView.classList.add('hidden');
+      sidebar.classList.add('hidden');
+    }
+
+    function navigateToSession(id) {
+      history.pushState(null, '', `/session/${id}`);
+      loadSessionDetail(id);
+    }
+
+    function navigateBack() {
+      history.pushState(null, '', '/');
+      showListView();
+    }
+
+    window.addEventListener('popstate', () => route());
+
+    function formatTokens(n) {
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toString();
+    }
+
+    async function loadSessionDetail(id) {
+      showDetailView();
+      detailContent.innerHTML = `<div class="py-24 text-center"><p class="text-muted text-sm font-light">Loading session...</p></div>`;
+
+      try {
+        const res = await fetch(`${API}/${id}/details`);
+        if (!res.ok) {
+          detailContent.innerHTML = `
+            <div class="py-24 text-center">
+              <p class="text-subtle text-sm font-light mb-2">No conversation data found</p>
+              <p class="text-muted text-xs font-mono">JSONL file not found for this session</p>
+              <button onclick="navigateBack()" class="mt-4 px-4 py-2 rounded-md text-xs font-mono border border-border text-muted hover:text-bright hover:border-border-bright transition-all">Back</button>
+            </div>`;
+          return;
+        }
+        const data = await res.json();
+        renderDetail(data);
+      } catch (e) {
+        detailContent.innerHTML = `<div class="py-24 text-center"><p class="text-danger text-sm">Failed to load session</p></div>`;
+      }
+    }
+
+    function renderDetail(data) {
+      const s = data.stats;
+      const toolEntries = Object.entries(s.tool_calls).sort((a, b) => b[1] - a[1]);
+
+      detailContent.innerHTML = `
+        <!-- Header -->
+        <div class="flex items-center gap-3 mb-6">
+          <button onclick="navigateBack()" class="p-1.5 rounded-md hover:bg-accent-glow text-muted hover:text-accent transition-all">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m15 18-6-6 6-6"/>
+            </svg>
+          </button>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-bright text-base font-medium truncate">${escHtml(data.title)}</h2>
+            <div class="flex items-center gap-3 mt-0.5">
+              <span class="font-mono text-[11px] text-muted/70">${data.id.slice(0, 8)}</span>
+              <span class="font-mono text-[11px] text-muted/50">${escHtml(shortPath(data.pwd))}</span>
+              <span class="text-[11px] text-muted/50">${timeAgo(data.created_at)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+          <div class="bg-raised border border-border rounded-lg px-4 py-3">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-muted/60 mb-1">Messages</div>
+            <div class="text-bright text-lg font-light">${s.user_messages + s.assistant_messages}</div>
+            <div class="text-[11px] text-muted/60 font-mono">${s.user_messages} user / ${s.assistant_messages} assistant</div>
+          </div>
+          <div class="bg-raised border border-border rounded-lg px-4 py-3">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-muted/60 mb-1">Duration</div>
+            <div class="text-bright text-lg font-light">${s.duration_minutes}m</div>
+          </div>
+          <div class="bg-raised border border-border rounded-lg px-4 py-3">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-muted/60 mb-1">Tokens</div>
+            <div class="text-bright text-lg font-light">${formatTokens(s.total_input_tokens + s.total_output_tokens)}</div>
+            <div class="text-[11px] text-muted/60 font-mono">${formatTokens(s.total_input_tokens)} in / ${formatTokens(s.total_output_tokens)} out</div>
+          </div>
+          <div class="bg-raised border border-border rounded-lg px-4 py-3">
+            <div class="text-[10px] font-mono uppercase tracking-widest text-muted/60 mb-1">Tool Calls</div>
+            <div class="text-bright text-lg font-light">${toolEntries.reduce((a, b) => a + b[1], 0)}</div>
+            <div class="text-[11px] text-muted/60 font-mono truncate">${toolEntries.slice(0, 3).map(([n, c]) => n + ':' + c).join(' ')}</div>
+          </div>
+        </div>
+
+        ${toolEntries.length > 0 ? `
+        <div class="flex flex-wrap gap-1.5 mb-8">
+          ${toolEntries.map(([name, count]) => `
+            <span class="px-2 py-0.5 rounded-md bg-accent-glow border border-border text-[11px] font-mono text-muted">${escHtml(name)} <span class="text-bright">${count}</span></span>
+          `).join('')}
+        </div>` : ''}
+
+        <!-- Conversation -->
+        <div class="text-[10px] font-mono uppercase tracking-widest text-muted/60 mb-3 border-b border-border pb-2">Conversation</div>
+        <div class="space-y-1">
+          ${data.messages.map((m, i) => renderMessage(m, i)).join('')}
+        </div>
+      `;
+    }
+
+    function renderMessage(m, index) {
+      const isUser = m.role === 'user';
+      const toolBadges = (m.tools || []).map(t =>
+        `<span class="px-1.5 py-0.5 rounded bg-accent-glow border border-border text-[10px] font-mono text-muted">${escHtml(t)}</span>`
+      ).join('');
+
+      // Truncate very long messages with expand
+      const maxLen = 2000;
+      const isLong = m.text.length > maxLen;
+      const displayText = isLong ? m.text.slice(0, maxLen) : m.text;
+
+      const rendered = isUser
+        ? `<div class="text-sm text-primary/90 font-light whitespace-pre-wrap break-words leading-relaxed">${escHtml(displayText)}${isLong ? '<span class="text-muted">...</span>' : ''}</div>`
+        : `<div class="text-sm text-primary/90 font-light break-words md-prose" id="msg-${index}">${typeof marked !== 'undefined' ? marked.parse(displayText) : escHtml(displayText)}${isLong ? '<span class="text-muted">...</span>' : ''}</div>`;
+
+      return `
+        <div class="row-animate flex gap-3 py-3 ${index > 0 ? 'border-t border-border/40' : ''}" style="animation-delay:${index * 20}ms">
+          <div class="shrink-0 w-16 pt-0.5">
+            <span class="text-[10px] font-mono uppercase tracking-wider ${isUser ? 'text-accent' : 'text-muted/70'}">${isUser ? 'you' : 'claude'}</span>
+          </div>
+          <div class="flex-1 min-w-0">
+            ${toolBadges ? `<div class="flex flex-wrap gap-1 mb-1.5">${toolBadges}</div>` : ''}
+            ${rendered}
+            ${isLong ? `<button onclick="expandMsg(${index}, this)" data-full="${btoa(unescape(encodeURIComponent(m.text)))}" class="text-[11px] text-muted hover:text-accent font-mono mt-1 transition-colors">show more</button>` : ''}
+          </div>
+          <div class="shrink-0 w-16 text-right">
+            <span class="text-[10px] text-muted/40 font-mono">${m.timestamp ? m.timestamp.slice(11, 16) : ''}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function expandMsg(index, btn) {
+      const full = decodeURIComponent(escape(atob(btn.dataset.full)));
+      const el = document.getElementById('msg-' + index);
+      if (el.classList.contains('md-prose') && typeof marked !== 'undefined') {
+        el.innerHTML = marked.parse(full);
+      } else {
+        el.textContent = full;
+      }
+      btn.remove();
+    }
+
+    // Routing
+    function route() {
+      const path = decodeURIComponent(location.pathname);
+      const sessionMatch = path.match(/^\/session\/([a-f0-9-]+)$/);
+      if (sessionMatch) {
+        loadSessionDetail(sessionMatch[1]);
+      } else {
+        showListView();
+      }
+    }
+
     async function load() {
       try {
         const res = await fetch(API);
         sessions = await res.json();
+
+        const path = decodeURIComponent(location.pathname);
+        const sessionMatch = path.match(/^\/session\/([a-f0-9-]+)$/);
+        if (sessionMatch) {
+          loadSessionDetail(sessionMatch[1]);
+          renderSidebar();
+          return;
+        }
+
+        const slug = path.replace(/^\//, '');
+        if (slug) {
+          const match = sessions.find(s => dirLabel(s.pwd) === slug);
+          if (match) activeFilter = match.pwd;
+        }
         renderSidebar();
         renderFiltered();
       } catch (e) {

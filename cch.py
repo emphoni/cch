@@ -157,7 +157,148 @@ def delete_session(identifier: str):
     print(f"Deleted {deleted} session(s)." if deleted else f"No session found for '{identifier}'.")
 
 
+def rename_session(identifier: str, new_title: str):
+    db = get_db()
+    if identifier.isdigit():
+        idx = int(identifier) - 1
+        rows = db.execute(
+            "SELECT * FROM sessions ORDER BY created_at DESC"
+        ).fetchall()
+        if 0 <= idx < len(rows):
+            row = rows[idx]
+            db.execute("UPDATE sessions SET title = ? WHERE id = ?", (new_title, row["id"]))
+            db.commit()
+            db.close()
+            print(f"Renamed: {row['title']} -> {new_title}")
+            return
+        db.close()
+        print(f"Index {identifier} out of range.")
+        return
+
+    updated = db.execute("UPDATE sessions SET title = ? WHERE id = ?", (new_title, identifier)).rowcount
+    if not updated:
+        updated = db.execute(
+            "UPDATE sessions SET title = ? WHERE id LIKE ?", (new_title, f"%{identifier}%")
+        ).rowcount
+    db.commit()
+    db.close()
+    print(f"Renamed to: {new_title}" if updated else f"No session found for '{identifier}'.")
+
+
+CLAUDE_DIR = Path.home() / ".claude" / "projects"
+
+
+def find_session_jsonl(session_id: str):
+    """Find the JSONL file for a session across all Claude project dirs."""
+    if not CLAUDE_DIR.exists():
+        return None
+    for proj_dir in CLAUDE_DIR.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        jsonl = proj_dir / f"{session_id}.jsonl"
+        if jsonl.exists():
+            return jsonl
+    return None
+
+
+def parse_session_details(session_id: str):
+    """Parse a session JSONL file and return structured details."""
+    jsonl_path = find_session_jsonl(session_id)
+    if not jsonl_path:
+        return None
+
+    messages = []
+    tool_calls = {}
+    total_input = 0
+    total_output = 0
+    first_ts = None
+    last_ts = None
+
+    with open(jsonl_path) as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = d.get("type")
+            ts = d.get("timestamp")
+
+            if msg_type not in ("user", "assistant"):
+                continue
+
+            if ts:
+                if not first_ts:
+                    first_ts = ts
+                last_ts = ts
+
+            msg = d.get("message", {})
+            content = msg.get("content", "")
+
+            if msg_type == "user":
+                if isinstance(content, str) and content.strip():
+                    messages.append({"role": "user", "text": content, "timestamp": ts})
+
+            elif msg_type == "assistant":
+                usage = msg.get("usage", {})
+                total_input += usage.get("input_tokens", 0)
+                total_output += usage.get("output_tokens", 0)
+
+                if isinstance(content, list):
+                    texts = []
+                    tools = []
+                    for c in content:
+                        if isinstance(c, dict):
+                            if c.get("type") == "text" and c.get("text", "").strip():
+                                texts.append(c["text"])
+                            elif c.get("type") == "tool_use":
+                                name = c.get("name", "unknown")
+                                tools.append(name)
+                                tool_calls[name] = tool_calls.get(name, 0) + 1
+                    if texts or tools:
+                        entry = {"role": "assistant", "text": "\n".join(texts), "timestamp": ts}
+                        if tools:
+                            entry["tools"] = tools
+                        messages.append(entry)
+
+    # Compute duration
+    duration = 0
+    if first_ts and last_ts:
+        try:
+            t1 = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
+            t2 = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+            duration = int((t2 - t1).total_seconds() / 60)
+        except Exception:
+            pass
+
+    user_count = sum(1 for m in messages if m["role"] == "user")
+    assistant_count = sum(1 for m in messages if m["role"] == "assistant")
+
+    # Get session metadata from DB
+    db = get_db()
+    row = db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    db.close()
+
+    return {
+        "id": session_id,
+        "title": row["title"] if row else session_id[:8],
+        "pwd": row["pwd"] if row else "",
+        "created_at": row["created_at"] if row else first_ts or "",
+        "messages": messages,
+        "stats": {
+            "user_messages": user_count,
+            "assistant_messages": assistant_count,
+            "tool_calls": tool_calls,
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "duration_minutes": duration,
+        },
+    }
+
+
 DASHBOARD_PATH = Path(__file__).parent / "dashboard.html"
+FAVICON_PATH = Path(__file__).parent / "favicon.ico"
+MARKED_PATH = Path(__file__).parent / "vendor" / "marked.min.js"
 
 
 class CCHHandler(BaseHTTPRequestHandler):
@@ -165,7 +306,20 @@ class CCHHandler(BaseHTTPRequestHandler):
         pass  # silence request logs
 
     def do_GET(self):
-        if self.path == "/api/sessions":
+        if self.path.startswith("/api/sessions/") and self.path.endswith("/details"):
+            session_id = self.path[len("/api/sessions/"):-len("/details")]
+            details = parse_session_details(session_id)
+            if details:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(details).encode())
+            else:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"session not found"}')
+        elif self.path == "/api/sessions":
             db = get_db()
             rows = db.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
             db.close()
@@ -174,12 +328,48 @@ class CCHHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(data).encode())
-        elif self.path == "/":
+        elif self.path == "/api/db":
+            data = DB_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="sessions.db"')
+            self.end_headers()
+            self.wfile.write(data)
+        elif self.path == "/vendor/marked.min.js":
+            js = MARKED_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.end_headers()
+            self.wfile.write(js)
+        elif self.path == "/favicon.ico":
+            ico = FAVICON_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/x-icon")
+            self.end_headers()
+            self.wfile.write(ico)
+        else:
+            # SPA fallback: serve dashboard for any unmatched GET
             html = DASHBOARD_PATH.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(html)
+
+    def do_PUT(self):
+        if self.path.startswith("/api/sessions/"):
+            session_id = self.path[len("/api/sessions/"):]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
+            title = body.get("title")
+            if title:
+                db = get_db()
+                db.execute("UPDATE sessions SET title = ? WHERE id = ?", (title, session_id))
+                db.commit()
+                db.close()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
         else:
             self.send_error(404)
 
@@ -235,6 +425,11 @@ def main():
     p_resume = sub.add_parser("resume", aliases=["r"], help="Resume a session (by ID, partial ID, or list index)")
     p_resume.add_argument("identifier", help="Session ID, partial ID, or list index from `cch ls`")
 
+    # cch rename <id or index> "new title"
+    p_rename = sub.add_parser("rename", help="Rename a saved session")
+    p_rename.add_argument("identifier", help="Session ID, partial ID, or list index")
+    p_rename.add_argument("title", help="New title")
+
     # cch rm <id or index>
     p_rm = sub.add_parser("rm", aliases=["del"], help="Delete a saved session")
     p_rm.add_argument("identifier", help="Session ID, partial ID, or list index")
@@ -244,7 +439,7 @@ def main():
     p_web.add_argument("-p", "--port", type=int, default=5111, help="Port (default: 5111)")
 
     # If first arg isn't a known subcommand, treat as: cch <id> "title"
-    known = ("save", "s", "ls", "list", "find", "f", "resume", "r", "rm", "del", "web", "w", "-h", "--help")
+    known = ("save", "s", "ls", "list", "find", "f", "resume", "r", "rename", "rm", "del", "web", "w", "-h", "--help")
     if len(sys.argv) >= 3 and sys.argv[1] not in known:
         save_session(sys.argv[1], sys.argv[2])
         return
@@ -259,6 +454,8 @@ def main():
         search_sessions(args.query)
     elif args.command in ("resume", "r"):
         resume_session(args.identifier)
+    elif args.command == "rename":
+        rename_session(args.identifier, args.title)
     elif args.command in ("rm", "del"):
         delete_session(args.identifier)
     elif args.command in ("web", "w"):
